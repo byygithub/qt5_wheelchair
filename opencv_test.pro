@@ -18,10 +18,12 @@ LIBS += -L/usr/local/arm_opencv480/lib \
 QMAKE_LFLAGS += -Wl,-rpath=/usr/local/arm_opencv480/lib
 
 SOURCES += main.cpp\
+           i2c_master.cpp \
            inference.cpp \
            mainwindow.cpp
 
 HEADERS  += mainwindow.h\
+            i2c_master.h \
             inference.h
 
 DEFINES += QT_DEPRECATED_WARNINGS

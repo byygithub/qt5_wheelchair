@@ -16,6 +16,7 @@
 #include <QThread>
 #include <QMutex>
 #include <QMetaType>
+#include <QDebug>
 #include "inference.h"  // 引入宏定义
 
 Q_DECLARE_METATYPE(std::vector<Detection>);
@@ -114,6 +115,9 @@ private:
     int frameCounter;  // 先声明
     bool isYoloInit;   // 后声明
     YoloInferThread *inferThread;
+
+    // I2C文件描述符
+    int i2c_fd;
 };
 
 #endif // MAINWINDOW_H

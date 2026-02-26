@@ -1,10 +1,19 @@
-#include "mainwindow.h"
-#include <QApplication>
-#include <QDebug>
-#include <QMessageBox>
-#include <QDateTime>
+// ========== 新增：I2C相关头文件和宏定义 ==========
+#include "i2c_master.h"
+#define I2C_DEFAULT_VALUE     100    // 默认发送值
+#define I2C_PATH              "/dev/i2c-1"  // 根据硬件调整
+#define I2C_SLAVE_ADDR        0x48         // 根据硬件调整
+#define HEAD_UP_VALUE         100    // up对应值
+#define HEAD_DOWN_VALUE       100    // down对应值（已添加）
+#define HEAD_LEFT_VALUE       100    // left对应值
+#define HEAD_RIGHT_VALUE      100    // right对应值
+#define HEAD_FORWARD_VALUE    100    // front对应值
+#define HEAD_UNKNOWN_VALUE    100    // 未知姿态值
 
-// 修复初始化顺序警告（声明顺序=初始化顺序）
+// 原有头文件
+#include "mainwindow.h"
+
+// 构造函数
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , isCameraRunning(false)
@@ -13,17 +22,28 @@ MainWindow::MainWindow(QWidget *parent)
     , isYoloInit(false) // 后初始化
     , inferThread(nullptr)
 {
+    // 注册自定义类型
     qRegisterMetaType<std::vector<Detection>>("std::vector<Detection>");
+
+    // ========== 新增：I2C初始化 ==========
+    int i2c_fd = i2c_init(I2C_PATH, I2C_SLAVE_ADDR);
+    if (i2c_fd < 0) {
+        QMessageBox::warning(this, "I2C警告", "I2C设备初始化失败！\n将继续运行摄像头和检测功能，但无法输出I2C数据");
+        qDebug() << "I2C初始化失败，路径：" << I2C_PATH << " 从地址：" << QString::number(I2C_SLAVE_ADDR, 16);
+    } else {
+        qDebug() << "I2C初始化成功，文件描述符：" << i2c_fd << " 路径：" << I2C_PATH;
+    }
 
     // 初始化推理线程
     std::string onnxPath = "/root/last.onnx";
     inferThread = new YoloInferThread(onnxPath, this);
     isYoloInit = inferThread->isInit();
 
+    // 连接推理完成信号
     connect(inferThread, &YoloInferThread::inferenceFinished, this, &MainWindow::onInferenceFinished);
     inferThread->start();
 
-    // 打印宏定义尺寸
+    // 打印初始化信息
     if (isYoloInit) {
         qDebug() << "YOLOv11n推理线程初始化成功：" << QString::fromStdString(onnxPath)
                  << " 输入尺寸： " << MODEL_INPUT_SIZE << " x " << MODEL_INPUT_SIZE;
@@ -64,7 +84,7 @@ MainWindow::MainWindow(QWidget *parent)
     mainLayout->addWidget(cameraLabel);
     this->setCentralWidget(centralWidget);
 
-    // 状态栏（显示宏定义尺寸）
+    // 状态栏
     QStatusBar *statusBar = new QStatusBar(this);
     this->setStatusBar(statusBar);
     this->statusBar()->showMessage("就绪 - OpenCV版本：" + QString(CV_VERSION) +
@@ -82,22 +102,34 @@ MainWindow::MainWindow(QWidget *parent)
     connect(captureBtn, &QPushButton::clicked, this, &MainWindow::captureScreenshot);
 }
 
+// 析构函数
 MainWindow::~MainWindow()
 {
+    // 释放摄像头
     if (cap.isOpened()) {
         cap.release();
     }
+
+    // 停止推理线程
     if (inferThread) {
         inferThread->stop();
         delete inferThread;
     }
+
+    // ========== 新增：关闭I2C设备 ==========
+    static int i2c_fd = i2c_init(I2C_PATH, I2C_SLAVE_ADDR);
+    if (i2c_fd >= 0) {
+        i2c_close(i2c_fd);
+        qDebug() << "I2C设备已关闭，文件描述符：" << i2c_fd;
+    }
 }
 
+// 推理完成槽函数（核心：包含I2C发送逻辑）
 void MainWindow::onInferenceFinished(const std::vector<Detection>& detections)
 {
     qDebug() << "\n==================== YOLOv11n 检测结果 ====================";
 
-    // ===== 核心修改：筛选置信度最高的单个目标 =====
+    // 筛选置信度最高的目标
     Detection bestDetection;
     float maxConfidence = 0.0f;
     for (const Detection& det : detections) {
@@ -107,25 +139,69 @@ void MainWindow::onInferenceFinished(const std::vector<Detection>& detections)
         }
     }
 
-    // 只打印置信度最高的那个目标
+    // 检测到有效目标
     if (maxConfidence > 0.0f) {
+        // 原有打印逻辑（完全不变）
         qDebug() << "检测目标  1 :";
         qDebug() << "  头部姿态：" << QString::fromStdString(bestDetection.className);
         qDebug() << "  置信度：" << QString::number(bestDetection.confidence, 'f', 4);
         qDebug() << "  检测框坐标：x=" << bestDetection.box.x << " y=" << bestDetection.box.y
                  << " 宽度=" << bestDetection.box.width << " 高度=" << bestDetection.box.height;
 
-        // 状态栏只显示最高置信度的结果
+        // ========== 新增：I2C发送逻辑（适配up/down/left/right/front） ==========
+        static int i2c_fd = i2c_init(I2C_PATH, I2C_SLAVE_ADDR);
+        unsigned char i2c_send_val = I2C_DEFAULT_VALUE;
+        QString temp_pose = QString::fromStdString(bestDetection.className);
+
+        // 姿态判断（明确包含down）
+        if (temp_pose == "up") {
+            i2c_send_val = HEAD_UP_VALUE;
+        } else if (temp_pose == "down") {
+            i2c_send_val = HEAD_DOWN_VALUE;
+        } else if (temp_pose == "left") {
+            i2c_send_val = HEAD_LEFT_VALUE;
+        } else if (temp_pose == "right") {
+            i2c_send_val = HEAD_RIGHT_VALUE;
+        } else if (temp_pose == "front") {
+            i2c_send_val = HEAD_FORWARD_VALUE;
+        } else {
+            i2c_send_val = HEAD_UNKNOWN_VALUE;
+        }
+
+        // 发送I2C数据
+        if (i2c_fd >= 0) {
+            int ret = i2c_send_byte(i2c_fd, i2c_send_val);
+            if (ret == 0) {
+                qDebug() << "I2C发送成功 | 姿态：" << temp_pose << " | 发送值：" << (int)i2c_send_val;
+            } else {
+                qDebug() << "I2C发送失败 | 姿态：" << temp_pose << " | 尝试发送值：" << (int)i2c_send_val;
+            }
+        } else {
+            qDebug() << "I2C未初始化 | 姿态：" << temp_pose << " | 待发送值：" << (int)i2c_send_val;
+        }
+
+        // 原有状态栏逻辑（完全不变）
         this->statusBar()->showMessage("YOLOv11n检测完成 | 头部姿态：" + QString::fromStdString(bestDetection.className) +
                                " | 置信度：" + QString::number(bestDetection.confidence, 'f', 2) +
                                " | 输入尺寸：" + QString("%1x%1").arg(MODEL_INPUT_SIZE) + " | 推理耗时：约10-14秒");
     } else {
+        // 未检测到目标（原有逻辑）
         qDebug() << "  未检测到头部姿态";
+
+        // ========== 新增：未检测到姿态时发送默认值 ==========
+        static int i2c_fd = i2c_init(I2C_PATH, I2C_SLAVE_ADDR);
+        if (i2c_fd >= 0) {
+            i2c_send_byte(i2c_fd, HEAD_UNKNOWN_VALUE);
+            qDebug() << "I2C发送：未检测到姿态 | 发送值：" << (int)HEAD_UNKNOWN_VALUE;
+        }
+
+        // 原有状态栏逻辑（完全不变）
         this->statusBar()->showMessage("YOLOv11n检测完成 | 未检测到头部姿态 | 输入尺寸：" + QString("%1x%1").arg(MODEL_INPUT_SIZE) + " | 推理耗时：约10-14秒");
     }
     qDebug() << "===========================================================\n";
 }
 
+// 摄像头启停（原有逻辑完全不变）
 void MainWindow::toggleCamera()
 {
     if (!isCameraRunning) {
@@ -133,12 +209,14 @@ void MainWindow::toggleCamera()
         bool openSuccess = false;
         int tryIndex = cameraIndex;
 
+        // 尝试打开摄像头
         cap.open(tryIndex, cv::CAP_V4L2);
         if (cap.isOpened()) {
             cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
             openSuccess = true;
         }
 
+        // 备用索引
         if (!openSuccess) {
             tryIndex = (cameraIndex == 1) ? 0 : 1;
             cap.open(tryIndex);
@@ -148,13 +226,14 @@ void MainWindow::toggleCamera()
             }
         }
 
+        // 打开失败提示
         if (!openSuccess) {
             QMessageBox::critical(this, "错误", "无法打开Q8 HD摄像头！\n解决方案：\n1. 执行 sudo ./OpenCV_CameraMonitor 运行\n2. 更换USB2.0接口\n3. 重启开发板后重试");
             this->statusBar()->showMessage("错误：摄像头打开失败 | 尝试索引：" + QString::number(cameraIndex) + "," + QString::number(tryIndex));
             return;
         }
 
-        // 摄像头参数（适配宏定义尺寸）
+        // 摄像头参数设置
         cap.set(cv::CAP_PROP_FRAME_WIDTH, MODEL_INPUT_SIZE);
         cap.set(cv::CAP_PROP_FRAME_HEIGHT, MODEL_INPUT_SIZE * 3 / 4); // 4:3比例
         cap.set(cv::CAP_PROP_FPS, 10);
@@ -164,18 +243,21 @@ void MainWindow::toggleCamera()
 
         frameCounter = 0;
 
+        // 启动定时器
         timer->start();
         isCameraRunning = true;
         startStopBtn->setText("停止摄像头");
         captureBtn->setEnabled(true);
         cameraLabel->setText("");
 
+        // 更新状态栏
         int width = cap.get(cv::CAP_PROP_FRAME_WIDTH);
         int height = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
         this->statusBar()->showMessage("Q8 HD摄像头已启动 | 索引：" + QString::number(tryIndex) +
                                " | 分辨率：" + QString::number(width) + "x" + QString::number(height) +
                                " | 格式：MJPG | YOLOv11n：每20帧异步检测一次（" + QString("%1x%1").arg(MODEL_INPUT_SIZE) + " | 792MHz）");
     } else {
+        // 停止摄像头
         timer->stop();
         cap.release();
         isCameraRunning = false;
@@ -187,12 +269,14 @@ void MainWindow::toggleCamera()
     }
 }
 
+// 更新摄像头画面（原有逻辑完全不变）
 void MainWindow::updateCameraFrame()
 {
     if (!cap.isOpened()) return;
 
     cv::Mat frame;
     bool readSuccess = false;
+    // 重试读取帧（避免丢帧）
     for (int i = 0; i < 3; i++) {
         if (cap.read(frame)) {
             readSuccess = true;
@@ -207,6 +291,7 @@ void MainWindow::updateCameraFrame()
     }
 
     frameCounter++;
+    // 每20帧触发一次推理
     if (isYoloInit && frameCounter % 20 == 0) {
         inferThread->setFrame(frame);
         this->statusBar()->showMessage("YOLOv11n异步推理中 | 当前帧：" + QString::number(frameCounter) +
@@ -217,7 +302,7 @@ void MainWindow::updateCameraFrame()
                                "） | 输入尺寸：" + QString("%1x%1").arg(MODEL_INPUT_SIZE) + " | 792MHz");
     }
 
-    // 显示画面
+    // 转换格式并显示
     cv::Mat rgbFrame;
     cv::cvtColor(frame, rgbFrame, cv::COLOR_BGR2RGB);
     QImage qImage(rgbFrame.data, rgbFrame.cols, rgbFrame.rows, rgbFrame.step, QImage::Format_RGB888);
@@ -227,6 +312,7 @@ void MainWindow::updateCameraFrame()
     cameraLabel->setPixmap(pixmap);
 }
 
+// 截图保存（原有逻辑完全不变）
 void MainWindow::captureScreenshot()
 {
     if (!cap.isOpened()) return;
@@ -235,10 +321,12 @@ void MainWindow::captureScreenshot()
     cap.read(frame);
     if (frame.empty()) return;
 
+    // 生成带时间戳的文件名
     QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss");
     QString savePath = QString("/root/q8_yolov11n_capture_%1_%2x%2.jpg").arg(timestamp).arg(MODEL_INPUT_SIZE);
     cv::imwrite(savePath.toStdString(), frame);
 
+    // 提示保存成功
     QMessageBox::information(this, "截图成功", "Q8摄像头截图已保存：\n" + savePath);
     this->statusBar()->showMessage("截图已保存：" + savePath +
                            " | 输入尺寸：" + QString("%1x%1").arg(MODEL_INPUT_SIZE) + " | 异步推理不卡UI | 792MHz");
