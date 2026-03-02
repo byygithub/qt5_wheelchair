@@ -1,5 +1,5 @@
-#include "uart_master.h"
 #include "mainwindow.h"
+#include "uart_master.h"
 
 // 构造函数（核心修改：方向键布局）
 MainWindow::MainWindow(QWidget *parent)
@@ -177,59 +177,61 @@ MainWindow::~MainWindow()
     }
 }
 
-// ========== 方向键按钮槽函数实现 ==========
+// ========== 方向键按钮槽函数实现（加速版） ==========
 void MainWindow::onForwardBtnClicked() {
     if (uart_fd >= 0) {
+        // 第一步：先发送指令（核心加速，无延迟）
         uart_send_char(uart_fd, 'F');
-        qDebug() << "【手动控制】向前 → 发送字符 F";
-        statusBar()->showMessage("手动控制：向前 (F) | " + statusBar()->currentMessage());
+        // 第二步：极简日志+状态栏（减少耗时）
+        qDebug("【手动控制】向前 → F");
+        statusBar()->showMessage("手动控制：向前 (F)");
     } else {
-        qDebug() << "【手动控制失败】UART未初始化，无法发送 F";
-        QMessageBox::warning(this, "警告", "UART串口未初始化，无法发送向前指令！");
+        qDebug("【手动控制失败】无法发送 F");
+        QMessageBox::warning(this, "警告", "UART未初始化，无法发送向前指令！");
     }
 }
 
 void MainWindow::onBackwardBtnClicked() {
     if (uart_fd >= 0) {
         uart_send_char(uart_fd, 'B');
-        qDebug() << "【手动控制】向后 → 发送字符 B";
-        statusBar()->showMessage("手动控制：向后 (B) | " + statusBar()->currentMessage());
+        qDebug("【手动控制】向后 → B");
+        statusBar()->showMessage("手动控制：向后 (B)");
     } else {
-        qDebug() << "【手动控制失败】UART未初始化，无法发送 B";
-        QMessageBox::warning(this, "警告", "UART串口未初始化，无法发送向后指令！");
+        qDebug("【手动控制失败】无法发送 B");
+        QMessageBox::warning(this, "警告", "UART未初始化，无法发送向后指令！");
     }
 }
 
 void MainWindow::onLeftBtnClicked() {
     if (uart_fd >= 0) {
         uart_send_char(uart_fd, 'L');
-        qDebug() << "【手动控制】向左 → 发送字符 L";
-        statusBar()->showMessage("手动控制：向左 (L) | " + statusBar()->currentMessage());
+        qDebug("【手动控制】向左 → L");
+        statusBar()->showMessage("手动控制：向左 (L)");
     } else {
-        qDebug() << "【手动控制失败】UART未初始化，无法发送 L";
-        QMessageBox::warning(this, "警告", "UART串口未初始化，无法发送向左指令！");
+        qDebug("【手动控制失败】无法发送 L");
+        QMessageBox::warning(this, "警告", "UART未初始化，无法发送向左指令！");
     }
 }
 
 void MainWindow::onRightBtnClicked() {
     if (uart_fd >= 0) {
         uart_send_char(uart_fd, 'R');
-        qDebug() << "【手动控制】向右 → 发送字符 R";
-        statusBar()->showMessage("手动控制：向右 (R) | " + statusBar()->currentMessage());
+        qDebug("【手动控制】向右 → R");
+        statusBar()->showMessage("手动控制：向右 (R)");
     } else {
-        qDebug() << "【手动控制失败】UART未初始化，无法发送 R";
-        QMessageBox::warning(this, "警告", "UART串口未初始化，无法发送向右指令！");
+        qDebug("【手动控制失败】无法发送 R");
+        QMessageBox::warning(this, "警告", "UART未初始化，无法发送向右指令！");
     }
 }
 
 void MainWindow::onStopBtnClicked() {
     if (uart_fd >= 0) {
         uart_send_char(uart_fd, 'S');
-        qDebug() << "【手动控制】停止 → 发送字符 S";
-        statusBar()->showMessage("手动控制：停止 (S) | " + statusBar()->currentMessage());
+        qDebug("【手动控制】停止 → S");
+        statusBar()->showMessage("手动控制：停止 (S)");
     } else {
-        qDebug() << "【手动控制失败】UART未初始化，无法发送 S";
-        QMessageBox::warning(this, "警告", "UART串口未初始化，无法发送停止指令！");
+        qDebug("【手动控制失败】无法发送 S");
+        QMessageBox::warning(this, "警告", "UART未初始化，无法发送停止指令！");
     }
 }
 
