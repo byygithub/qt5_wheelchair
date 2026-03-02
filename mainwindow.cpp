@@ -1,19 +1,7 @@
-// ========== 新增：I2C相关头文件和宏定义 ==========
-#include "i2c_master.h"
-#define I2C_DEFAULT_VALUE     100    // 默认发送值
-#define I2C_PATH              "/dev/i2c-1"  // 根据硬件调整
-#define I2C_SLAVE_ADDR        0x48         // 根据硬件调整
-#define HEAD_UP_VALUE         100    // up对应值
-#define HEAD_DOWN_VALUE       100    // down对应值（已添加）
-#define HEAD_LEFT_VALUE       100    // left对应值
-#define HEAD_RIGHT_VALUE      100    // right对应值
-#define HEAD_FORWARD_VALUE    100    // front对应值
-#define HEAD_UNKNOWN_VALUE    100    // 未知姿态值
-
-// 原有头文件
+#include "uart_master.h"
 #include "mainwindow.h"
 
-// 构造函数
+// 构造函数（完全不变）
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , isCameraRunning(false)
@@ -24,15 +12,6 @@ MainWindow::MainWindow(QWidget *parent)
 {
     // 注册自定义类型
     qRegisterMetaType<std::vector<Detection>>("std::vector<Detection>");
-
-    // ========== 新增：I2C初始化 ==========
-    int i2c_fd = i2c_init(I2C_PATH, I2C_SLAVE_ADDR);
-    if (i2c_fd < 0) {
-        QMessageBox::warning(this, "I2C警告", "I2C设备初始化失败！\n将继续运行摄像头和检测功能，但无法输出I2C数据");
-        qDebug() << "I2C初始化失败，路径：" << I2C_PATH << " 从地址：" << QString::number(I2C_SLAVE_ADDR, 16);
-    } else {
-        qDebug() << "I2C初始化成功，文件描述符：" << i2c_fd << " 路径：" << I2C_PATH;
-    }
 
     // 初始化推理线程
     std::string onnxPath = "/root/last.onnx";
@@ -100,9 +79,17 @@ MainWindow::MainWindow(QWidget *parent)
     // 信号槽
     connect(startStopBtn, &QPushButton::clicked, this, &MainWindow::toggleCamera);
     connect(captureBtn, &QPushButton::clicked, this, &MainWindow::captureScreenshot);
+
+    // ========== 仅新增：在构造函数中初始化UART（只初始化一次，避免重复打开） ==========
+    uart_fd = uart_init("/dev/ttymxc5");
+    if (uart_fd < 0) {
+        fprintf(stderr, "【UART初始化失败】无法发送控制指令，请检查/dev/ttymxc5是否存在并以ROOT权限运行\n");
+    } else {
+        qDebug() << "【UART初始化成功】已打开/dev/ttymxc5，波特率115200";
+    }
 }
 
-// 析构函数
+// 析构函数（仅新增：关闭UART）
 MainWindow::~MainWindow()
 {
     // 释放摄像头
@@ -116,15 +103,14 @@ MainWindow::~MainWindow()
         delete inferThread;
     }
 
-    // ========== 新增：关闭I2C设备 ==========
-    static int i2c_fd = i2c_init(I2C_PATH, I2C_SLAVE_ADDR);
-    if (i2c_fd >= 0) {
-        i2c_close(i2c_fd);
-        qDebug() << "I2C设备已关闭，文件描述符：" << i2c_fd;
+    // ========== 仅新增：关闭UART ==========
+    if (uart_fd >= 0) {
+        uart_close(uart_fd);
+        qDebug() << "【UART已关闭】释放串口资源";
     }
 }
 
-// 推理完成槽函数（核心：包含I2C发送逻辑）
+// 推理完成槽函数（仅修改UART发送逻辑，其余完全不变）
 void MainWindow::onInferenceFinished(const std::vector<Detection>& detections)
 {
     qDebug() << "\n==================== YOLOv11n 检测结果 ====================";
@@ -148,36 +134,26 @@ void MainWindow::onInferenceFinished(const std::vector<Detection>& detections)
         qDebug() << "  检测框坐标：x=" << bestDetection.box.x << " y=" << bestDetection.box.y
                  << " 宽度=" << bestDetection.box.width << " 高度=" << bestDetection.box.height;
 
-        // ========== 新增：I2C发送逻辑（适配up/down/left/right/front） ==========
-        static int i2c_fd = i2c_init(I2C_PATH, I2C_SLAVE_ADDR);
-        unsigned char i2c_send_val = I2C_DEFAULT_VALUE;
         QString temp_pose = QString::fromStdString(bestDetection.className);
 
-        // 姿态判断（明确包含down）
-        if (temp_pose == "up") {
-            i2c_send_val = HEAD_UP_VALUE;
-        } else if (temp_pose == "down") {
-            i2c_send_val = HEAD_DOWN_VALUE;
-        } else if (temp_pose == "left") {
-            i2c_send_val = HEAD_LEFT_VALUE;
-        } else if (temp_pose == "right") {
-            i2c_send_val = HEAD_RIGHT_VALUE;
-        } else if (temp_pose == "front") {
-            i2c_send_val = HEAD_FORWARD_VALUE;
-        } else {
-            i2c_send_val = HEAD_UNKNOWN_VALUE;
-        }
-
-        // 发送I2C数据
-        if (i2c_fd >= 0) {
-            int ret = i2c_send_byte(i2c_fd, i2c_send_val);
-            if (ret == 0) {
-                qDebug() << "I2C发送成功 | 姿态：" << temp_pose << " | 发送值：" << (int)i2c_send_val;
+        // ========== 仅修改：UART发送逻辑（按你要求的字符映射） ==========
+        if (uart_fd >= 0) { // 仅当UART初始化成功时发送
+            if (temp_pose == "up") {
+                uart_send_char(uart_fd, 'S'); // up → S
+            } else if (temp_pose == "down") {
+                uart_send_char(uart_fd, 'B'); // down → B
+            } else if (temp_pose == "left") {
+                uart_send_char(uart_fd, 'L'); // left → L
+            } else if (temp_pose == "right") {
+                uart_send_char(uart_fd, 'R'); // right → R
+            } else if (temp_pose == "front") {
+                uart_send_char(uart_fd, 'F'); // front → F
             } else {
-                qDebug() << "I2C发送失败 | 姿态：" << temp_pose << " | 尝试发送值：" << (int)i2c_send_val;
+                uart_send_char(uart_fd, 'S'); // 其他 → S
             }
+            qDebug() << "【UART发送成功】姿态：" << temp_pose << " → 字符：" << (temp_pose == "up" ? 'S' : (temp_pose == "down" ? 'B' : (temp_pose == "left" ? 'L' : (temp_pose == "right" ? 'R' : (temp_pose == "front" ? 'F' : 'S')))));
         } else {
-            qDebug() << "I2C未初始化 | 姿态：" << temp_pose << " | 待发送值：" << (int)i2c_send_val;
+            qDebug() << "【UART发送失败】串口未初始化，无法发送字符";
         }
 
         // 原有状态栏逻辑（完全不变）
@@ -188,20 +164,13 @@ void MainWindow::onInferenceFinished(const std::vector<Detection>& detections)
         // 未检测到目标（原有逻辑）
         qDebug() << "  未检测到头部姿态";
 
-        // ========== 新增：未检测到姿态时发送默认值 ==========
-        static int i2c_fd = i2c_init(I2C_PATH, I2C_SLAVE_ADDR);
-        if (i2c_fd >= 0) {
-            i2c_send_byte(i2c_fd, HEAD_UNKNOWN_VALUE);
-            qDebug() << "I2C发送：未检测到姿态 | 发送值：" << (int)HEAD_UNKNOWN_VALUE;
-        }
-
-        // 原有状态栏逻辑（完全不变）
+        // 原有状态栏逻辑
         this->statusBar()->showMessage("YOLOv11n检测完成 | 未检测到头部姿态 | 输入尺寸：" + QString("%1x%1").arg(MODEL_INPUT_SIZE) + " | 推理耗时：约10-14秒");
     }
     qDebug() << "===========================================================\n";
 }
 
-// 摄像头启停（原有逻辑完全不变）
+// 摄像头启停（完全不变）
 void MainWindow::toggleCamera()
 {
     if (!isCameraRunning) {
@@ -269,7 +238,7 @@ void MainWindow::toggleCamera()
     }
 }
 
-// 更新摄像头画面（原有逻辑完全不变）
+// 更新摄像头画面（完全不变）
 void MainWindow::updateCameraFrame()
 {
     if (!cap.isOpened()) return;
@@ -312,7 +281,7 @@ void MainWindow::updateCameraFrame()
     cameraLabel->setPixmap(pixmap);
 }
 
-// 截图保存（原有逻辑完全不变）
+// 截图保存（完全不变）
 void MainWindow::captureScreenshot()
 {
     if (!cap.isOpened()) return;

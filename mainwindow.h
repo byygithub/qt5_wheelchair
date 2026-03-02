@@ -18,10 +18,11 @@
 #include <QMetaType>
 #include <QDebug>
 #include "inference.h"  // 引入宏定义
+#include "uart_master.h" // 新增：引入UART头文件
 
 Q_DECLARE_METATYPE(std::vector<Detection>);
 
-// 推理线程类
+// 推理线程类（完全不变）
 class YoloInferThread : public QThread
 {
     Q_OBJECT
@@ -88,7 +89,7 @@ private:
     Inference *yoloInfer;
 };
 
-// 主窗口类
+// 主窗口类（仅修改：将i2c_fd改为uart_fd）
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -116,8 +117,8 @@ private:
     bool isYoloInit;   // 后声明
     YoloInferThread *inferThread;
 
-    // I2C文件描述符
-    int i2c_fd;
+    //UART文件描述符
+    int uart_fd;
 };
 
 #endif // MAINWINDOW_H
