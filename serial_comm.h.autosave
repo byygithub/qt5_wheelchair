@@ -1,0 +1,41 @@
+#ifndef SERIAL_COMM_H
+#define SERIAL_COMM_H
+
+#include <QObject>
+#include <QSerialPort>
+#include <QSerialPortInfo>
+#include <QDebug>
+#include <QByteArray>
+#include <QTimer>
+
+// 适配i.MX6ULL开发板的UART通信类（替换原I2C）
+class SerialComm : public QObject
+{
+    Q_OBJECT
+public:
+    explicit SerialComm(QObject *parent = nullptr);
+    ~SerialComm() override;
+
+    // 初始化串口（开发板UART6：/dev/ttymxc5）
+    bool init();
+
+    // 发送控制指令（替换原I2C写数据）
+    bool sendCmd(const QByteArray &cmd);
+
+    // 获取串口是否初始化成功
+    bool isReady() const { return m_isReady; }
+
+signals:
+    // 接收数据信号（供上层解析）
+    void recvData(const QByteArray &data);
+
+private slots:
+    // 串口数据接收槽函数
+    void onReadyRead();
+
+private:
+    QSerialPort *m_serial = nullptr;  // 串口对象
+    bool m_isReady = false;           // 串口初始化状态
+};
+
+#endif // SERIAL_COMM_H

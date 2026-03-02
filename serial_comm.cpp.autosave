@@ -1,0 +1,73 @@
+#include "serial_comm.h"
+
+SerialComm::SerialComm(QObject *parent) : QObject(parent)
+{
+    m_serial = new QSerialPort(this);
+
+    // 绑定数据接收信号
+    connect(m_serial, &QSerialPort::readyRead, this, &SerialComm::onReadyRead);
+}
+
+SerialComm::~SerialComm()
+{
+    if (m_serial->isOpen()) {
+        m_serial->close();
+    }
+    m_isReady = false;
+}
+
+bool SerialComm::init()
+{
+    // 1. 配置开发板UART6参数（固定适配i.MX6ULL）
+    m_serial->setPortName("/dev/ttymxc5");       // 开发板UART6节点
+    m_serial->setBaudRate(QSerialPort::Baud115200); // 波特率115200（与STM32匹配）
+    m_serial->setDataBits(QSerialPort::Data8);    // 8位数据位
+    m_serial->setParity(QSerialPort::NoParity);   // 无校验
+    m_serial->setStopBits(QSerialPort::OneStop);  // 1位停止位
+    m_serial->setFlowControl(QSerialPort::NoFlowControl); // 无流控
+
+    // 2. 打开串口（开发板需ROOT权限）
+    if (!m_serial->open(QIODevice::ReadWrite)) {
+        qCritical() << "UART6打开失败：" << m_serial->errorString();
+        qCritical() << "请检查：1. /dev/ttymxc5是否存在 2. 以ROOT权限运行程序";
+        return false;
+    }
+
+    // 3. 清空缓冲区
+    m_serial->clear();
+    m_isReady = true;
+    qInfo() << "i.MX6ULL UART6初始化成功！";
+    return true;
+}
+
+bool SerialComm::sendCmd(const QByteArray &cmd)
+{
+    if (!m_isReady || cmd.isEmpty()) {
+        qWarning() << "串口未就绪或指令为空，发送失败";
+        return false;
+    }
+
+    // 发送指令并强制刷出缓冲区（开发板串口必需）
+    qint64 writeLen = m_serial->write(cmd);
+    m_serial->flush();
+
+    if (writeLen != cmd.length()) {
+        qWarning() << "指令发送失败，实际发送：" << writeLen << "字节，期望：" << cmd.length();
+        return false;
+    }
+
+    qInfo() << "发送指令：" << cmd.toHex(' ');
+    return true;
+}
+
+void SerialComm::onReadyRead()
+{
+    if (!m_isReady) return;
+
+    // 读取所有接收数据
+    QByteArray data = m_serial->readAll();
+    if (data.isEmpty()) return;
+
+    qInfo() << "接收数据：" << data.toHex(' ');
+    emit recvData(data); // 转发给上层解析
+}

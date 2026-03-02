@@ -89,7 +89,7 @@ private:
     Inference *yoloInfer;
 };
 
-// 主窗口类（仅修改：将i2c_fd改为uart_fd）
+// 主窗口类（新增方向按钮+停止按钮成员变量）
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -103,11 +103,24 @@ private slots:
     void updateCameraFrame();
     void captureScreenshot();
     void onInferenceFinished(const std::vector<Detection>& detections);
+    // 新增：方向按钮+停止按钮槽函数
+    void onForwardBtnClicked();   // 向前 → F
+    void onBackwardBtnClicked();  // 向后 → B
+    void onLeftBtnClicked();      // 向左 → L
+    void onRightBtnClicked();     // 向右 → R
+    void onStopBtnClicked();      // 停止 → S
 
 private:
     QLabel *cameraLabel;
     QPushButton *startStopBtn;
     QPushButton *captureBtn;
+
+    // 方向键布局按钮
+    QPushButton *forwardBtn;   // 向前（上）
+    QPushButton *backwardBtn;  // 向后（下）
+    QPushButton *leftBtn;      // 向左（左）
+    QPushButton *rightBtn;     // 向右（右）
+    QPushButton *stopBtn;      // 停止（中）
 
     cv::VideoCapture cap;
     QTimer *timer;
